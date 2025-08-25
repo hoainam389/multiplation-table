@@ -1,9 +1,12 @@
 export interface Question {
+  tableNumber: number;
   number: number;
   multiplier: number;
   answer: number;
   type: "multiplication" | "division";
   question: string;
+  difficulty?: number;
+  options?: number[];
 }
 
 export interface MultipleChoiceOptions {

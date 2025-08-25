@@ -22,6 +22,7 @@ export default function MultiplicationTable() {
     multipleChoiceOptions,
     currentQuestionIndex,
     showFeedback,
+    isGenerating,
     numbers,
     
     // Computed values
@@ -87,6 +88,7 @@ export default function MultiplicationTable() {
           onGenerateQuestions={generateQuestions}
           onResetPractice={resetPractice}
           getQuestionCount={getQuestionCount}
+          isGenerating={isGenerating}
         />
       )}
 

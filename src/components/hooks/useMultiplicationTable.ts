@@ -1,7 +1,9 @@
 import { useState, useCallback, useMemo, useRef } from "react";
 import { Question, MultipleChoiceOptions, UserAnswers, QuestionType, CurrentQuestionData } from "../types";
+import questionsData from "../../data/questions.json";
 
 export const useMultiplicationTable = () => {
+  // Selected table numbers (1-10) for multiplication/division practice
   const [selectedNumbers, setSelectedNumbers] = useState<number[]>([1]);
   const [practiceMode, setPracticeMode] = useState(false);
   const [multipleChoice, setMultipleChoice] = useState(true);
@@ -12,13 +14,36 @@ export const useMultiplicationTable = () => {
   const [multipleChoiceOptions, setMultipleChoiceOptions] = useState<MultipleChoiceOptions>({});
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   // Use refs to store timers to prevent memory leaks
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const scoreCheckTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Memoize numbers array to prevent recreation on every render
+  // Memoize available table numbers (1-10) to prevent recreation on every render
   const numbers = useMemo(() => Array.from({ length: 10 }, (_, i) => i + 1), []);
+
+  // Memoize filtered questions based on selected numbers and question type
+  const availableQuestions = useMemo(() => {
+    return (questionsData.questions as Question[]).filter((question) => {
+      // Filter by question type first
+      let matchesType = false;
+      if (questionType === "mixed") {
+        matchesType = true;
+      } else if (questionType === "multiplication") {
+        matchesType = question.type === "multiplication";
+      } else if (questionType === "division") {
+        matchesType = question.type === "division";
+      }
+      
+      if (!matchesType) return false;
+      
+      // Filter by tableNumber (selected numbers represent the tables to practice)
+      const matchesTable = selectedNumbers.includes(question.tableNumber);
+      
+      return matchesTable;
+    });
+  }, [selectedNumbers, questionType]);
 
   // Clear all timers to prevent memory leaks
   const clearAllTimers = useCallback(() => {
@@ -40,9 +65,11 @@ export const useMultiplicationTable = () => {
     setMultipleChoiceOptions({});
     setCurrentQuestionIndex(0);
     setShowFeedback(false);
+    setIsGenerating(false);
     clearAllTimers();
   }, [clearAllTimers]);
 
+  // Toggle selection of multiplication/division tables (1-10)
   const handleNumberToggle = useCallback((num: number) => {
     setSelectedNumbers((prev) => {
       if (prev.includes(num)) {
@@ -60,97 +87,101 @@ export const useMultiplicationTable = () => {
     multiplier: number;
   }) => `${question.type}-${question.number}-${question.multiplier}`, []);
 
-  const generateMultipleChoiceOptions = useCallback((
-    correctAnswer: number,
-    questionType: "multiplication" | "division"
-  ) => {
-    const options = [correctAnswer];
-
-    // Generate 3 wrong answers based on question type
-    while (options.length < 4) {
-      let wrongAnswer: number;
-
-      if (questionType === "multiplication") {
-        // For multiplication, wrong answers should be close to correct
-        wrongAnswer = correctAnswer + Math.floor(Math.random() * 10) - 5;
-      } else {
-        // For division, wrong answers should be reasonable divisors
-        wrongAnswer = Math.max(
-          1,
-          correctAnswer + Math.floor(Math.random() * 6) - 3
-        );
-      }
-
-      if (
-        wrongAnswer > 0 &&
-        wrongAnswer !== correctAnswer &&
-        !options.includes(wrongAnswer)
-      ) {
-        options.push(wrongAnswer);
-      }
-    }
-
-    // Shuffle options
-    return options.sort(() => Math.random() - 0.5);
-  }, []);
-
   const generateQuestions = useCallback(() => {
-    const questions: Question[] = [];
-
-    // Generate exactly 10 questions
-    const targetQuestionCount = 10;
-
-    // Create a pool of all possible questions
-    const allQuestions: Question[] = [];
-
-    selectedNumbers.forEach((number) => {
-      numbers.forEach((multiplier) => {
-        if (questionType === "multiplication" || questionType === "mixed") {
+    setIsGenerating(true);
+    
+    // Use setTimeout to prevent blocking the UI
+    setTimeout(() => {
+      // Use pre-generated questions from questions.json
+      const allQuestions: Question[] = [...availableQuestions];
+      
+      // Debug: Log available questions for verification
+      console.log('Available questions from JSON:', availableQuestions.length);
+      console.log('Selected table numbers:', selectedNumbers);
+      console.log('Question type:', questionType);
+      if (availableQuestions.length > 0) {
+        console.log('Sample questions:', availableQuestions.slice(0, 3).map(q => 
+          `Table ${q.tableNumber} - ${q.type}: ${q.number} ${q.type === 'multiplication' ? '×' : '÷'} ${q.multiplier} = ${q.answer}`
+        ));
+      }
+      
+      // If we don't have enough questions, add some basic ones as fallback
+      if (allQuestions.length < 10) {
+        const basicNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        basicNumbers.forEach((number) => {
+          if (allQuestions.length >= 20) return; // Limit fallback questions
+          
+          for (let multiplier = 1; multiplier <= 10; multiplier++) {
+            if (allQuestions.length >= 20) break;
+            
+                    if (questionType === "multiplication" || questionType === "mixed") {
           allQuestions.push({
+            tableNumber: number,
             number,
             multiplier,
             answer: number * multiplier,
-            type: "multiplication",
+            type: "multiplication" as const,
             question: `${number} × ${multiplier} = ?`,
+            difficulty: Math.ceil((number + multiplier) / 3),
+            options: []
           });
         }
-
-        if (questionType === "division" || questionType === "mixed") {
-          const dividend = number * multiplier;
-          allQuestions.push({
-            number: dividend,
-            multiplier: number,
-            answer: multiplier,
-            type: "division",
-            question: `${dividend} ÷ ${number} = ?`,
-          });
+          }
+        });
+      }
+      
+      // Shuffle questions and select 10
+      const shuffled = [...allQuestions];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      
+      const selectedQuestions = shuffled.slice(0, 10);
+      
+      // Generate multiple choice options for each question
+      const optionsMap: MultipleChoiceOptions = {};
+      selectedQuestions.forEach((question) => {
+        const questionKey = getQuestionKey(question);
+        
+        // Use pre-generated options if available, otherwise generate new ones
+        if (question.options && question.options.length === 4) {
+          optionsMap[questionKey] = question.options;
+        } else {
+          // Generate options for questions without pre-generated options
+          const options = [question.answer];
+          while (options.length < 4) {
+            let wrongAnswer: number;
+            
+            if (question.type === "multiplication") {
+              wrongAnswer = question.answer + Math.floor(Math.random() * 10) - 5;
+            } else {
+              wrongAnswer = Math.max(1, question.answer + Math.floor(Math.random() * 6) - 3);
+            }
+            
+            if (
+              wrongAnswer > 0 &&
+              wrongAnswer !== question.answer &&
+              !options.includes(wrongAnswer)
+            ) {
+              options.push(wrongAnswer);
+            }
+          }
+          optionsMap[questionKey] = options.sort(() => Math.random() - 0.5);
         }
       });
-    });
-
-    // Shuffle all questions and take the first 10
-    const shuffled = allQuestions.sort(() => Math.random() - 0.5);
-    const selectedQuestions = shuffled.slice(0, targetQuestionCount);
-
-    // Generate multiple choice options for each question
-    const optionsMap: MultipleChoiceOptions = {};
-    selectedQuestions.forEach((question) => {
-      const questionKey = getQuestionKey(question);
-      optionsMap[questionKey] = generateMultipleChoiceOptions(
-        question.answer,
-        question.type
-      );
-    });
-
-    // Batch all state updates to prevent multiple re-renders
-    setMultipleChoiceOptions(optionsMap);
-    setCurrentQuestions(selectedQuestions);
-    setUserAnswers({});
-    setScore(0);
-    setCurrentQuestionIndex(0);
-    setShowFeedback(false);
-    clearAllTimers();
-  }, [selectedNumbers, numbers, questionType, clearAllTimers, getQuestionKey, generateMultipleChoiceOptions]);
+      
+      // Batch all state updates to prevent multiple re-renders
+      setMultipleChoiceOptions(optionsMap);
+      setCurrentQuestions(selectedQuestions);
+      setUserAnswers({});
+      setScore(0);
+      setCurrentQuestionIndex(0);
+      setShowFeedback(false);
+      clearAllTimers();
+      setIsGenerating(false);
+    }, 0);
+  }, [availableQuestions, questionType, clearAllTimers, getQuestionKey]);
 
   const goToNextQuestion = useCallback(() => {
     if (currentQuestionIndex < currentQuestions.length - 1) {
@@ -254,7 +285,7 @@ export const useMultiplicationTable = () => {
     
     const questionKey = getQuestionKey(question);
     const userAnswer = userAnswers[questionKey] || "";
-    const isCorrect = userAnswer && parseInt(userAnswer) === question.answer;
+    const isCorrect: boolean = Boolean(userAnswer && parseInt(userAnswer) === question.answer);
     
     return { question, questionKey, userAnswer, isCorrect };
   }, [currentQuestions, getCurrentQuestion, getQuestionKey, userAnswers]);
@@ -277,6 +308,7 @@ export const useMultiplicationTable = () => {
     multipleChoiceOptions,
     currentQuestionIndex,
     showFeedback,
+    isGenerating,
     numbers,
     
     // Computed values
